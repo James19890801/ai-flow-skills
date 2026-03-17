@@ -29,6 +29,14 @@ description: 绘制流程图、泳道图、跨部门流程图。当用户说"画
 4. **脚本内置坐标冲突检查**，生成 XML 前必须断言所有节点 X 坐标唯一，有冲突则抛出异常
 5. **自动打开预览**，py 脚本最后一行必须是 `subprocess.Popen(['start', html_path], shell=True)`
 
+### 鲁棒性强制规范
+
+6. **Python 脚本必须包含异常捕获**：所有文件写入、XML 生成操作用 `try/except` 包裹，失败时打印清晰错误信息
+7. **XML 合法性验证前置**：写入文件前必须用 `xml.etree.ElementTree.fromstring()` 验证 XML 合法，解析报错则中止并提示修复
+8. **HTML 预览打开失败容错**：若 `subprocess.Popen` 报错（如文件不存在），捕获异常并打印文件绝对路径，提示用户手动打开
+9. **字段值转义保护**：所有写入 XML `value` 属性的字符串必须转义 `&`→`&amp;`、`<`→`&lt;`、`>`→`&gt;`、`"`→`&quot;`，防止 XML 结构损坏
+10. **JS 模板字符串转义三件套**：XML 写入 HTML JS 模板字符串前必须转义 `` ` ``→`` \` ``，`$`→`\$`，`\`→`\\`，缺一不可
+
 ---
 
 
@@ -86,7 +94,6 @@ pool_cell = f'''<mxCell id="pool" value=""
   <mxGeometry x="20" y="{POOL_Y}" width="{total_w}" height="{len(lanes)*LANE_H}" as="geometry"/>
 </mxCell>'''
 ```
-
 
 
 ```xml
@@ -220,6 +227,9 @@ pool_cell = f'''<mxCell id="pool" value=""
 </mxCell>
 ```
 
+
+
+
 **KCP 关键控制点（蓝色加粗边框，value 只写活动名称）：**
 
 ```xml
@@ -232,6 +242,8 @@ pool_cell = f'''<mxCell id="pool" value=""
   <mxGeometry x="[slot_x(n)]" y="[垂直居中]" width="120" height="40" as="geometry"/>
 </mxCell>
 ```
+
+
 
 **决策节点（菱形）：**
 
@@ -403,6 +415,53 @@ def check_x_unique(activities):
     print("✓ 坐标检查通过，无冲突")
 
 check_x_unique(activities)
+
+# ⑤ 生成XML前验证合法性（鲁棒性保障，必须执行）
+def validate_xml(xml_str):
+    import xml.etree.ElementTree as ET
+    try:
+        ET.fromstring(xml_str)
+        print("✓ XML 合法性验证通过")
+        return True
+    except ET.ParseError as e:
+        print(f"✗ XML 解析失败：{e}")
+        print("  请检查 value 属性中是否含有未转义的 & < > \" 字符")
+        return False
+
+# ⑥ 字段值安全转义函数（写入 XML value 前必须调用）
+def xml_escape(text: str) -> str:
+    return (str(text)
+        .replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+        .replace('"', '&quot;'))
+
+# ⑦ 安全写入文件（带异常捕获）
+def safe_write(path, content, encoding='utf-8'):
+    import os
+    try:
+        with open(path, 'w', encoding=encoding) as f:
+            f.write(content)
+        print(f"✓ 文件已写入：{os.path.abspath(path)}")
+        return True
+    except OSError as e:
+        print(f"✗ 文件写入失败：{e}")
+        print(f"  请检查目录是否存在或是否有写入权限：{os.path.dirname(os.path.abspath(path))}")
+        return False
+
+# ⑧ 安全打开预览（带异常捕获）
+def safe_open_preview(html_path):
+    import subprocess, os
+    abs_path = os.path.abspath(html_path)
+    if not os.path.exists(abs_path):
+        print(f"✗ 预览文件不存在：{abs_path}")
+        return
+    try:
+        subprocess.Popen(['start', abs_path], shell=True)
+        print(f"✓ 预览已自动打开：{abs_path}")
+    except Exception as e:
+        print(f"✗ 自动打开失败：{e}")
+        print(f"  请手动打开文件：{abs_path}")
 ```
 
 **检查清单（代码执行前必须过一遍）：**
@@ -411,6 +470,9 @@ check_x_unique(activities)
 □ 共享同一 slot 的活动，是否确实在业务上同时进行？
 □ check_x_unique() 是否通过（无异常）？
 ```
+
+
+
 
 ### Y 坐标（泳道内）
 
@@ -457,25 +519,46 @@ check_x_unique(activities)
 
 
 ```python
+
 import xml.etree.ElementTree as ET
 
+
+
 tree = ET.fromstring(xml_content)
+
 max_right = 0
+
 for cell in tree.iter('mxCell'):
+
     if cell.get('vertex') != '1':
+
         continue
+
     style = cell.get('style', '')
+
     if 'pool' in style or 'childLayout' in style or 'swimlane' in style:
+
         continue
+
     geo = cell.find('mxGeometry')
+
     if geo is not None:
+
         right = float(geo.get('x', 0)) + float(geo.get('width', 0))
+
         max_right = max(max_right, right)
+
+
 
 lane_width = int(max_right) + 60  # 60px 右留白
 
+
+
 # 将 lane_width 应用到 swim_container 和所有 lane_*
+
 ```
+
+
 
 - `swim_container` 的 `width` = `lane_width`
 
@@ -506,78 +589,151 @@ lane_width = int(max_right) + 60  # 60px 右留白
 
 
 ```python
+
 # 用 Python 生成 HTML，处理 XML 中的特殊字符转义
+
 with open('流程图.drawio', 'r', encoding='utf-8') as f:
+
     raw = f.read().strip()
 
+
+
 # JS 模板字符串安全转义（3 个字符）
+
 xml_js = raw.replace('\\', '\\\\').replace('`', '\\`').replace('$', '\\$')
 
+
+
 html = f"""<!DOCTYPE html>
+
 <html lang="zh-CN">
+
 <head>
+
 <meta charset="UTF-8">
+
 <title>流程图标题</title>
+
 <style>
-* {{ margin:0;padding:0;box-sizing:border-box; }}
-html,body {{ width:100%;height:100%;overflow:hidden; }}
+
+*  margin:0;padding:0;box-sizing:border-box; 
+
+html,body  width:100%;height:100%;overflow:hidden; 
+
 #header {{
+
   height:44px;background:#fff;border-bottom:1px solid #e8e8e8;
+
   display:flex;align-items:center;padding:0 16px;gap:12px;
-  font-family:"Microsoft YaHei",sans-serif;font-size:14px;
+
+  font-family:"Microsoft YaHei",sans-serif;font-size=14px;
+
 }}
-#header span {{ flex:1;font-weight:500; }}
+
+#header span  flex:1;font-weight:500; 
+
 #header button {{
+
   padding:5px 14px;border-radius:4px;font-size:13px;cursor:pointer;
+
   border:1px solid #d9d9d9;background:#fff;
+
 }}
-#frame-wrap {{ width:100%;height:calc(100vh - 44px); }}
-iframe {{ width:100%;height:100%;border:none; }}
+
+#frame-wrap  width:100%;height:calc(100vh - 44px); 
+
+iframe  width:100%;height:100%;border:none; 
+
 </style>
+
 </head>
+
 <body>
+
 <div id="header">
+
   <span>📋 流程图标题</span>
+
   <button onclick="dl()">⬇ 下载 .drawio 文件</button>
+
 </div>
+
 <div id="frame-wrap">
+
   <!-- 关键：使用 edit=1 开启全功能编辑器，去掉 noSaveBtn 和 noExitBtn -->
+
   <iframe id="drawio"
+
     src="https://embed.diagrams.net/?embed=1&spin=1&proto=json&ui=default&edit=1">
+
   </iframe>
+
 </div>
+
 <script>
-const XML = `{{xml_js}}`;
+
+const XML = `{xml_js}`;
+
 const iframe = document.getElementById('drawio');
 
+
+
 function sendXml() {{
+
   iframe.contentWindow.postMessage(
-    JSON.stringify({{ action: 'load', xml: XML, autosave: 1 }}), '*'
+
+    JSON.stringify({ action: 'load', xml: XML, autosave: 1 }), '*'
+
   );
+
 }}
+
+
 
 // 双重保险：load 事件 + init 消息，都触发加载
+
 iframe.addEventListener('load', () => setTimeout(sendXml, 1500));
+
 window.addEventListener('message', (e) => {{
+
   try {{
+
     const msg = JSON.parse(e.data);
+
     if (msg.event === 'init') sendXml();
+
     // 用户在编辑器内保存时，autosave 会回传修改后的 XML
+
     if (msg.event === 'autosave' || msg.event === 'save') {{
+
       console.log('已保存 XML:', msg.xml);
+
     }}
+
   }} catch(err) {{}}
+
 }});
 
+
+
 function dl() {{
+
   const blob = new Blob([XML], {{type:'application/xml'}});
+
   const a = document.createElement('a');
+
   a.href = URL.createObjectURL(blob);
+
   a.download = '流程图.drawio';
+
   a.click();
+
 }}
+
 </script>
+
 </body>
+
 </html>"""
 
 # 写入文件
@@ -591,6 +747,7 @@ subprocess.Popen(['start', 'd:/流程图.html'], shell=True)
 print('✓ 文件生成成功并已自动打开预览！')
 print('  drawio: d:/流程图.drawio')
 print('  HTML:   d:/流程图.html')
+
 ```
 
 
@@ -682,36 +839,104 @@ print('  HTML:   d:/流程图.html')
 
 | draw.io 加载后显示空白 | init 事件未捕获/发送时机太早 | 同时监听 `load`(+1500ms delay) 和 `init` postMessage |
 
+| **Python 脚本运行报 UnicodeEncodeError** | Windows 终端默认 GBK，打印中文报错 | 脚本顶部加 `import sys; sys.stdout.reconfigure(encoding='utf-8')` 或用 `os.environ['PYTHONIOENCODING']='utf-8'` |
+
+| **XML 写入后文件为空** | open() 写入异常被静默忽略 | 使用 `safe_write()` 函数包裹，捕获 OSError |
+
+| **draw.io 显示 "Invalid XML"** | 活动名称含 `&`、`<`、`>` 字符 | 所有 value 属性值必须调用 `xml_escape()` 函数 |
+
+| **脚本报 FileNotFoundError 写 drawio** | 目标目录不存在 | 脚本开头加 `os.makedirs(os.path.dirname(path), exist_ok=True)` |
+
 ---
 
-## 六、完整工作流程示例
+## 六、完整工作流程示例（含鲁棒性增强）
 
-以下是一个标准的泳道图生成工作流程，包含自动打开预览：
+以下是一个标准的泳道图生成工作流程，包含自动打开预览和所有容错机制：
 
 ```python
-# 1. 生成 draw.io XML 文件
-with open('流程名.drawio', 'w', encoding='utf-8') as f:
-    f.write(xml_content)
+import os, sys, subprocess
+import xml.etree.ElementTree as ET
 
-# 2. 生成 HTML 预览文件
+# 兼容 Windows 终端中文输出
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
+# ===== 工具函数 =====
+
+def xml_escape(text: str) -> str:
+    """写入 XML value 属性前必须调用"""
+    return (str(text)
+        .replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+        .replace('"', '&quot;'))
+
+def validate_xml(xml_str: str) -> bool:
+    """写入文件前验证 XML 合法性"""
+    try:
+        ET.fromstring(xml_str)
+        print("✓ XML 合法性验证通过")
+        return True
+    except ET.ParseError as e:
+        print(f"✗ XML 解析失败：{e}")
+        print("  请检查 value 属性中是否含有未转义的 & < > \" 字符")
+        return False
+
+def safe_write(path: str, content: str, encoding='utf-8') -> bool:
+    """安全写入文件，目录不存在时自动创建"""
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        with open(path, 'w', encoding=encoding) as f:
+            f.write(content)
+        print(f"✓ 文件已写入：{os.path.abspath(path)}")
+        return True
+    except OSError as e:
+        print(f"✗ 文件写入失败：{e}")
+        return False
+
+def safe_open_preview(html_path: str):
+    """安全打开预览，失败时提示手动打开"""
+    abs_path = os.path.abspath(html_path)
+    if not os.path.exists(abs_path):
+        print(f"✗ 预览文件不存在：{abs_path}")
+        return
+    try:
+        subprocess.Popen(['start', abs_path], shell=True)
+        print(f"✓ 预览已自动打开：{abs_path}")
+    except Exception as e:
+        print(f"✗ 自动打开失败：{e}")
+        print(f"  请手动打开文件：{abs_path}")
+
+# ===== 主流程 =====
+
+# 1. 生成 draw.io XML（所有活动名称先经过 xml_escape）
+# xml_content = ... 根据 activities 列表生成 ...
+
+# 2. 验证 XML 合法性，失败则中止
+if not validate_xml(xml_content):
+    raise SystemExit("XML 验证失败，请修复后重试")
+
+# 3. 安全写入 .drawio 文件
+drawio_path = 'd:/流程名.drawio'
+if not safe_write(drawio_path, xml_content):
+    raise SystemExit("drawio 文件写入失败，请检查权限")
+
+# 4. 生成 HTML：XML 写入 JS 模板字符串前必须转义三件套
+xml_js = xml_content.replace('\\', '\\\\').replace('`', '\\`').replace('$', '\\$')
+
 html_content = f"""<!DOCTYPE html>
+<html lang="zh-CN">
 ... HTML 模板内容 ...
-const XML = `{xml_content}`;
+const XML = `{xml_js}`;
 ... 其余 HTML ..."""
 
-with open('流程名.html', 'w', encoding='utf-8') as f:
-    f.write(html_content)
+# 5. 安全写入 HTML
+html_path = 'd:/流程名.html'
+if not safe_write(html_path, html_content):
+    print("  HTML 写入失败，但 .drawio 文件已保存，请用 draw.io 桌面版打开")
 
-# 3. 自动打开预览（必须步骤）
-# Windows:
-import os
-os.system('start 流程名.html')
-
-# macOS:
-# os.system('open 流程名.html')
-
-# Linux:
-# os.system('xdg-open 流程名.html')
+# 6. 自动打开预览（安全版）
+safe_open_preview(html_path)
 ```
 
 **关键要点**：
@@ -719,3 +944,4 @@ os.system('start 流程名.html')
 - 用户无需手动查找文件位置
 - 确保用户能第一时间看到流程图效果
 - 如果预览有问题，可以立即诊断修复
+- **所有步骤均有容错处理，单步失败不影响其他步骤**
