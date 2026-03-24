@@ -214,17 +214,28 @@ pool_cell = f'''<mxCell id="pool" value=""
 
 
 
-**普通活动节点（只写活动名称，禁止写备注）：**
+**普通活动节点（必须带编号，只写活动名称，禁止写备注）：**
+
+> **活动编号规范（强制）**：
+> - **顺序执行的活动**：使用连续阿拉伯数字编号（1.0、2.0、3.0...）
+> - **同步协同的活动**：使用相同编号（如 7.0 表示申请人、采购部、财务部同时参与验收）
+> - **决策点**：不编号（如"超限额？"）
+> - **开始/结束节点**：不编号
 
 ```xml
-<!-- value 只写活动名称，禁止加 <br/>、备注、时间说明等任何附加内容 -->
-<mxCell id="n1" value="活动名称"
+<!-- value 必须包含活动编号，格式：X.0 活动名称 -->
+<mxCell id="n1" value="1.0 提交采购申请"
   style="rounded=1;whiteSpace=wrap;html=1;
          fillColor=[泳道色];strokeColor=[泳道边框色];
          fontSize=11;arcSize=8;"
   vertex="1" parent="[所在 lane]">
   <mxGeometry x="[slot_x(n)]" y="[垂直居中]" width="120" height="40" as="geometry"/>
 </mxCell>
+
+<!-- 同步协同示例：同一编号 7.0 出现在多个泳道 -->
+<mxCell id="n8" value="7.0 参与验收" parent="lane0">...</mxCell>
+<mxCell id="n9" value="7.0 资产验收入库" parent="lane2">...</mxCell>
+<mxCell id="n10" value="7.0 参与验收" parent="lane3">...</mxCell>
 ```
 
 
@@ -509,7 +520,9 @@ def safe_open_preview(html_path):
 
 
 ```
+
 泳道宽度 = max(所有节点的 x + width) + 60px 右留白
+
 ```
 
 
@@ -928,7 +941,8 @@ html_content = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 ... HTML 模板内容 ...
 const XML = `{xml_js}`;
-... 其余 HTML ..."""
+... 其余 HTML ...
+"""
 
 # 5. 安全写入 HTML
 html_path = 'd:/流程名.html'
