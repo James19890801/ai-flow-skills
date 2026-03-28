@@ -28,14 +28,8 @@ description: 绘制流程图、泳道图、跨部门流程图。当用户说"画
 3. **每个活动必须占据唯一的 X 坐标槽位**，用代码 `slot` 机制分配，禁止凭感觉写坐标
 4. **脚本内置坐标冲突检查**，生成 XML 前必须断言所有节点 X 坐标唯一，有冲突则抛出异常
 5. **自动打开预览**，py 脚本最后一行必须是 `subprocess.Popen(['start', html_path], shell=True)`
-
-### 鲁棒性强制规范
-
-6. **Python 脚本必须包含异常捕获**：所有文件写入、XML 生成操作用 `try/except` 包裹，失败时打印清晰错误信息
-7. **XML 合法性验证前置**：写入文件前必须用 `xml.etree.ElementTree.fromstring()` 验证 XML 合法，解析报错则中止并提示修复
-8. **HTML 预览打开失败容错**：若 `subprocess.Popen` 报错（如文件不存在），捕获异常并打印文件绝对路径，提示用户手动打开
-9. **字段值转义保护**：所有写入 XML `value` 属性的字符串必须转义 `&`→`&amp;`、`<`→`&lt;`、`>`→`&gt;`、`"`→`&quot;`，防止 XML 结构损坏
-10. **JS 模板字符串转义三件套**：XML 写入 HTML JS 模板字符串前必须转义 `` ` ``→`` \` ``，`$`→`\$`，`\`→`\\`，缺一不可
+6. **连线转折点必须在活动块边界外至少20px**，禁止穿过任何活动块内部 —— 违反则图形严重失真
+7. **连线平进平出**：所有活动节点连线必须是左进右出（entryX=0, exitX=1），禁止从其他方向进出
 
 ---
 
@@ -94,6 +88,7 @@ pool_cell = f'''<mxCell id="pool" value=""
   <mxGeometry x="20" y="{POOL_Y}" width="{total_w}" height="{len(lanes)*LANE_H}" as="geometry"/>
 </mxCell>'''
 ```
+
 
 
 ```xml
@@ -214,29 +209,19 @@ pool_cell = f'''<mxCell id="pool" value=""
 
 
 
-**普通活动节点（必须带编号，只写活动名称，禁止写备注）：**
-
-> **活动编号规范（强制）**：
-> - **顺序执行的活动**：使用连续阿拉伯数字编号（1.0、2.0、3.0...）
-> - **同步协同的活动**：使用相同编号（如 7.0 表示申请人、采购部、财务部同时参与验收）
-> - **决策点**：不编号（如"超限额？"）
-> - **开始/结束节点**：不编号
+**普通活动节点（只写活动名称，禁止写备注）：**
 
 ```xml
-<!-- value 必须包含活动编号，格式：X.0 活动名称 -->
-<mxCell id="n1" value="1.0 提交采购申请"
+<!-- value 只写活动名称，禁止加 <br/>、备注、时间说明等任何附加内容 -->
+<mxCell id="n1" value="活动名称"
   style="rounded=1;whiteSpace=wrap;html=1;
          fillColor=[泳道色];strokeColor=[泳道边框色];
          fontSize=11;arcSize=8;"
   vertex="1" parent="[所在 lane]">
   <mxGeometry x="[slot_x(n)]" y="[垂直居中]" width="120" height="40" as="geometry"/>
 </mxCell>
-
-<!-- 同步协同示例：同一编号 7.0 出现在多个泳道 -->
-<mxCell id="n8" value="7.0 参与验收" parent="lane0">...</mxCell>
-<mxCell id="n9" value="7.0 资产验收入库" parent="lane2">...</mxCell>
-<mxCell id="n10" value="7.0 参与验收" parent="lane3">...</mxCell>
 ```
+
 
 
 
@@ -303,7 +288,11 @@ pool_cell = f'''<mxCell id="pool" value=""
 - **返工流程**：上出上进（`exitY=0, entryY=0`）或下出下进（`exitY=1, entryY=1`）
 - 返工线绝不使用左右连接点
 
-**优先级2：禁止穿过活动框**
+**优先级2：禁止穿过活动框（最高优先级）**
+- **所有连线（包括正向和返工）的转折点坐标，必须在活动块边界之外至少20px**
+- **转折点X坐标计算公式**：`转折点X = 源节点X + 节点宽度 + 20`（或 `目标节点X - 20`）
+- **绝对禁止**：转折点坐标落在任何活动块的 `[x, x+width]` 范围内
+- **示例**：若源节点n4在x=700，宽度120，右边界=820，则转折点X必须≥840（820+20）
 - 返工线必须计算路径，从所有活动框的上方或下方绕行
 - 宁可走高/走低，绝不穿过活动实体
 
@@ -426,53 +415,6 @@ def check_x_unique(activities):
     print("✓ 坐标检查通过，无冲突")
 
 check_x_unique(activities)
-
-# ⑤ 生成XML前验证合法性（鲁棒性保障，必须执行）
-def validate_xml(xml_str):
-    import xml.etree.ElementTree as ET
-    try:
-        ET.fromstring(xml_str)
-        print("✓ XML 合法性验证通过")
-        return True
-    except ET.ParseError as e:
-        print(f"✗ XML 解析失败：{e}")
-        print("  请检查 value 属性中是否含有未转义的 & < > \" 字符")
-        return False
-
-# ⑥ 字段值安全转义函数（写入 XML value 前必须调用）
-def xml_escape(text: str) -> str:
-    return (str(text)
-        .replace('&', '&amp;')
-        .replace('<', '&lt;')
-        .replace('>', '&gt;')
-        .replace('"', '&quot;'))
-
-# ⑦ 安全写入文件（带异常捕获）
-def safe_write(path, content, encoding='utf-8'):
-    import os
-    try:
-        with open(path, 'w', encoding=encoding) as f:
-            f.write(content)
-        print(f"✓ 文件已写入：{os.path.abspath(path)}")
-        return True
-    except OSError as e:
-        print(f"✗ 文件写入失败：{e}")
-        print(f"  请检查目录是否存在或是否有写入权限：{os.path.dirname(os.path.abspath(path))}")
-        return False
-
-# ⑧ 安全打开预览（带异常捕获）
-def safe_open_preview(html_path):
-    import subprocess, os
-    abs_path = os.path.abspath(html_path)
-    if not os.path.exists(abs_path):
-        print(f"✗ 预览文件不存在：{abs_path}")
-        return
-    try:
-        subprocess.Popen(['start', abs_path], shell=True)
-        print(f"✓ 预览已自动打开：{abs_path}")
-    except Exception as e:
-        print(f"✗ 自动打开失败：{e}")
-        print(f"  请手动打开文件：{abs_path}")
 ```
 
 **检查清单（代码执行前必须过一遍）：**
@@ -481,6 +423,7 @@ def safe_open_preview(html_path):
 □ 共享同一 slot 的活动，是否确实在业务上同时进行？
 □ check_x_unique() 是否通过（无异常）？
 ```
+
 
 
 
@@ -577,7 +520,7 @@ lane_width = int(max_right) + 60  # 60px 右留白
 
 - 每条 `lane_*` 的 `width` = `lane_width`
 
-- 生成后用 ET 验证 XML 合法性再写入文件
+- 生成后用 ET 韱证 XML 合法性再写入文件
 
 
 
@@ -852,105 +795,36 @@ print('  HTML:   d:/流程图.html')
 
 | draw.io 加载后显示空白 | init 事件未捕获/发送时机太早 | 同时监听 `load`(+1500ms delay) 和 `init` postMessage |
 
-| **Python 脚本运行报 UnicodeEncodeError** | Windows 终端默认 GBK，打印中文报错 | 脚本顶部加 `import sys; sys.stdout.reconfigure(encoding='utf-8')` 或用 `os.environ['PYTHONIOENCODING']='utf-8'` |
-
-| **XML 写入后文件为空** | open() 写入异常被静默忽略 | 使用 `safe_write()` 函数包裹，捕获 OSError |
-
-| **draw.io 显示 "Invalid XML"** | 活动名称含 `&`、`<`、`>` 字符 | 所有 value 属性值必须调用 `xml_escape()` 函数 |
-
-| **脚本报 FileNotFoundError 写 drawio** | 目标目录不存在 | 脚本开头加 `os.makedirs(os.path.dirname(path), exist_ok=True)` |
-
 ---
 
-## 六、完整工作流程示例（含鲁棒性增强）
+## 六、完整工作流程示例
 
-以下是一个标准的泳道图生成工作流程，包含自动打开预览和所有容错机制：
+以下是一个标准的泳道图生成工作流程，包含自动打开预览：
 
 ```python
-import os, sys, subprocess
-import xml.etree.ElementTree as ET
+# 1. 生成 draw.io XML 文件
+with open('流程名.drawio', 'w', encoding='utf-8') as f:
+    f.write(xml_content)
 
-# 兼容 Windows 终端中文输出
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
-
-# ===== 工具函数 =====
-
-def xml_escape(text: str) -> str:
-    """写入 XML value 属性前必须调用"""
-    return (str(text)
-        .replace('&', '&amp;')
-        .replace('<', '&lt;')
-        .replace('>', '&gt;')
-        .replace('"', '&quot;'))
-
-def validate_xml(xml_str: str) -> bool:
-    """写入文件前验证 XML 合法性"""
-    try:
-        ET.fromstring(xml_str)
-        print("✓ XML 合法性验证通过")
-        return True
-    except ET.ParseError as e:
-        print(f"✗ XML 解析失败：{e}")
-        print("  请检查 value 属性中是否含有未转义的 & < > \" 字符")
-        return False
-
-def safe_write(path: str, content: str, encoding='utf-8') -> bool:
-    """安全写入文件，目录不存在时自动创建"""
-    try:
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        with open(path, 'w', encoding=encoding) as f:
-            f.write(content)
-        print(f"✓ 文件已写入：{os.path.abspath(path)}")
-        return True
-    except OSError as e:
-        print(f"✗ 文件写入失败：{e}")
-        return False
-
-def safe_open_preview(html_path: str):
-    """安全打开预览，失败时提示手动打开"""
-    abs_path = os.path.abspath(html_path)
-    if not os.path.exists(abs_path):
-        print(f"✗ 预览文件不存在：{abs_path}")
-        return
-    try:
-        subprocess.Popen(['start', abs_path], shell=True)
-        print(f"✓ 预览已自动打开：{abs_path}")
-    except Exception as e:
-        print(f"✗ 自动打开失败：{e}")
-        print(f"  请手动打开文件：{abs_path}")
-
-# ===== 主流程 =====
-
-# 1. 生成 draw.io XML（所有活动名称先经过 xml_escape）
-# xml_content = ... 根据 activities 列表生成 ...
-
-# 2. 验证 XML 合法性，失败则中止
-if not validate_xml(xml_content):
-    raise SystemExit("XML 验证失败，请修复后重试")
-
-# 3. 安全写入 .drawio 文件
-drawio_path = 'd:/流程名.drawio'
-if not safe_write(drawio_path, xml_content):
-    raise SystemExit("drawio 文件写入失败，请检查权限")
-
-# 4. 生成 HTML：XML 写入 JS 模板字符串前必须转义三件套
-xml_js = xml_content.replace('\\', '\\\\').replace('`', '\\`').replace('$', '\\$')
-
+# 2. 生成 HTML 预览文件
 html_content = f"""<!DOCTYPE html>
-<html lang="zh-CN">
 ... HTML 模板内容 ...
-const XML = `{xml_js}`;
-... 其余 HTML ...
-"""
+const XML = `{xml_content}`;
+... 其余 HTML ..."""
 
-# 5. 安全写入 HTML
-html_path = 'd:/流程名.html'
-if not safe_write(html_path, html_content):
-    print("  HTML 写入失败，但 .drawio 文件已保存，请用 draw.io 桌面版打开")
+with open('流程名.html', 'w', encoding='utf-8') as f:
+    f.write(html_content)
 
-# 6. 自动打开预览（安全版）
-safe_open_preview(html_path)
+# 3. 自动打开预览（必须步骤）
+# Windows:
+import os
+os.system('start 流程名.html')
+
+# macOS:
+# os.system('open 流程名.html')
+
+# Linux:
+# os.system('xdg-open 流程名.html')
 ```
 
 **关键要点**：
@@ -958,4 +832,3 @@ safe_open_preview(html_path)
 - 用户无需手动查找文件位置
 - 确保用户能第一时间看到流程图效果
 - 如果预览有问题，可以立即诊断修复
-- **所有步骤均有容错处理，单步失败不影响其他步骤**
