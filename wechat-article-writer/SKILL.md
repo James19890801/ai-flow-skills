@@ -5,7 +5,7 @@
 
 **作者身份（每篇必须一致）：** 詹老师 | AI流程管理实战专家
 
-**目标读者：** 企业流程管理部门的推动者、内部AI落地负责人、流程体系建设者——他们正在寻找如何将AI与自己的专业结合，并向老板证明价值的具体路径。
+**目标读者：** 企业流程管理部门的推动者、内部AI落地负责人、流程体系建设者他们正在寻找如何将AI与自己的专业结合，并向老板证明价值的具体路径。
 
 所有文章必须从这个身份出发，每个选题、每个案例、每个落脚点，都要让这群读者产生「这说的就是我的处境」的共鸣。
 
@@ -64,37 +64,54 @@
 
 ### 第四步：整体配图
 
-**核心原则：所有配图必须用Canvas将SVG渲染为PNG格式，确保复制到公众号后图片不丢失。**
+**核心原则：所有配图必须用Canvas将SVG渲染为JPEG格式（高清3倍分辨率），确保复制到公众号后图片清晰且背景不丢失。**
 
-#### 为什么必须用Canvas转PNG？
+#### 为什么必须用Canvas转JPEG？
 
 **失败方案对比：**
 - ❌ CSS样式图（渐变背景+伪元素）：复制时CSS丢失，图片消失
 - ❌ SVG直接内嵌 `<svg>`：公众号编辑器不支持，复制后丢失
 - ❌ SVG Base64 `data:image/svg+xml;base64`：公众号过滤SVG格式
-- ✅ **Canvas转PNG `data:image/png;base64`**：公众号完全支持，复制正常
+- ❌ **Canvas转PNG**：PNG支持透明度，粘贴到公众号后深色背景可能变成透明/白色
+- ✅ **Canvas转JPEG `data:image/jpeg;base64`**：JPEG不支持透明，背景色完整保留，公众号完全支持
 
-#### svgToPng工具函数（必须使用）
+#### 高清JPEG转换函数（必须使用）
 
 ```javascript
-function svgToPng(svgString, callback, width, height) {
+// 高清JPEG版：解决公众号粘贴后背景消失的问题
+// 核心要点：1.使用JPEG格式 2.3倍分辨率 3.quality=0.95
+function svgToJpeg(svgString, callback, width, height) {
   const svgBlob = new Blob([svgString], {type: 'image/svg+xml;charset=utf-8'});
   const url = URL.createObjectURL(svgBlob);
   const img = new Image();
   img.onload = function() {
     const canvas = document.createElement('canvas');
-    canvas.width = width || 660;
-    canvas.height = height || 300;
+    // 3倍分辨率确保高清
+    canvas.width = width;
+    canvas.height = height;
     const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#fafafa';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0);
+    // 不填充背景，让SVG内部的背景色直接渲染
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     URL.revokeObjectURL(url);
-    callback(canvas.toDataURL('image/png'));
+    // JPEG格式，quality=0.95保证清晰度
+    callback(canvas.toDataURL('image/jpeg', 0.95));
   };
+  img.onerror = function() { URL.revokeObjectURL(url); };
   img.src = url;
 }
 ```
+
+#### 高清分辨率要求
+
+| 参数 | 标准版 | 高清版（必须使用） |
+|------|--------|-------------------|
+| **Canvas宽度** | 660px | **1980px**（3倍） |
+| **Canvas高度** | 200-300px | **600-900px**（3倍） |
+| **中文字号** | 14-21px | **42-63px**（3倍） |
+| **英文字号** | 9-13px | **27-39px**（3倍） |
+| **圆角半径** | 8-12px | **24-36px**（3倍） |
+| **边框粗细** | 1-4px | **3-12px**（3倍） |
+| **输出格式** | PNG | **JPEG**（quality=0.95） |
 
 #### 一键复制函数（必须使用）
 
@@ -120,10 +137,12 @@ function copyArticle() {
 
 **配图要求：**
 
-1. **高清原则**
-   - 使用SVG生成PNG，分辨率至少660px宽
-   - 文字清晰可读，配色协调
-   - 信息层次分明，视觉冲击力强
+1. **高清原则（必须遵守）**
+   - **分辨率**：SVG宽度必须为 **1980px**（3倍），高度按比例放大
+   - **字号**：中文至少 **36px**，英文至少 **27px**，确保手机屏幕清晰可读
+   - **格式**：必须输出为 **JPEG**（`canvas.toDataURL('image/jpeg', 0.95)`）
+   - **背景**：深色背景图必须在SVG内部定义`<rect fill="#282c34"/>`，不可依赖Canvas填充
+   - **配色协调**：使用macOS终端风格（深灰#282c34 + 金色#d4a842点缀）
 
 2. **配图类型**
    - 头图：大标题+副标题+渐变背景
@@ -139,7 +158,7 @@ function copyArticle() {
    - 必须设计一张可视化框架图（对比表/评分矩阵/架构图），作为全文核心观点的结晶
    - 要求：读者单独看这张图就能理解核心观点，具备独立传播价值
    - 典型样式：2xN对比表、四象限矩阵、三层架构图、五维评分雷达
-   - 用Canvas转PNG嵌入，确保复制到微信公众号后图片完整显示
+   - 用Canvas转JPEG嵌入，确保复制到微信公众号后图片完整显示
 
 #### SVG绘制避坑指南
 
